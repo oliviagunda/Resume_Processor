@@ -1,3 +1,35 @@
+## Installation Steps:
+1. Regarding MySql:
+
+a) Install MySql
+   docker run --name mysql \
+  -e MYSQL_ROOT_PASSWORD=root \
+  -e MYSQL_DATABASE=resume_db \
+  -p 3306:3306 \
+  -d mysql:8
+
+b) To run MySql in the docker:
+
+docker logs -f mysql
+
+c) To check the status:
+
+docker ps
+
+d) To connect to MySql:
+
+docker exec -it mysql mysql -u root -p
+
+When prompted for pwd, enter root
+
+2. Install Spacy
+
+python3 -m spacy download en_core_web_sm
+
+3. Install Pypdf
+
+pip install pypdf
+
 # AI Internship Project - Resume Parser
 
 A modular Python application for parsing resume PDFs and storing candidate information in MySQL database. This project is designed to be extended over multiple weeks with additional features like job matching and skill scoring.

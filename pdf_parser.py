@@ -46,7 +46,7 @@ class ResumeParser:
         self.skill_keywords = {
             'programming': [
                 'python', 'java', 'javascript', 'c++', 'c#', 'php', 'ruby', 'go',
-                'swift', 'kotlin', 'typescript', 'scala', 'r', 'matlab', 'sql'
+                'swift', 'kotlin', 'typescript', 'scala', 'matlab', 'sql'
             ],
             'web': [
                 'html', 'css', 'react', 'angular', 'vue', 'node.js', 'express',
@@ -104,27 +104,37 @@ class ResumeParser:
         return phones[0] if phones else None
     
     def extract_experience_years(self, text: str) -> float:
-        """Extract total years of experience."""
-        # Look for patterns like "5 years", "2+ years", etc.
-        experience_patterns = [
-            r'(\d+(?:\.\d+)?)\s*(?:\+)?\s*years?\s+(?:of\s+)?experience',
-            r'experience.*?(\d+(?:\.\d+)?)\s*(?:\+)?\s*years?',
-            r'(\d+(?:\.\d+)?)\s*yr[s]?\s+exp',
-        ]
-        
+        """Extract total years of experience, accounting for months as well."""
+
         experience_years = []
         text_lower = text.lower()
-        
+
+        # Extended patterns to match various year and month formats
+        experience_patterns = [
+            r'(?P<years>\d+(?:\.\d+)?)\s*(?:\+)?\s*years?(?:\s+and\s+(?P<months>\d+)\s*months?)?',
+            r'(?P<months_only>\d+)\s*months?\s+(?:of\s+)?experience',
+            r'experience.*?(?P<years>\d+(?:\.\d+)?)\s*(?:\+)?\s*years?',
+            r'(?P<years>\d+(?:\.\d+)?)\s*yr[s]?\s+exp'
+        ]
+
         for pattern in experience_patterns:
-            matches = re.findall(pattern, text_lower)
-            for match in matches:
-                try:
-                    experience_years.append(float(match))
-                except ValueError:
-                    continue
-        
-        # Return the maximum found (assuming most recent/comprehensive)
-        return max(experience_years) if experience_years else 0.0
+            for match in re.finditer(pattern, text_lower):
+                match_dict = match.groupdict()
+                years = match_dict.get('years')
+                months = match_dict.get('months')
+                months_only = match_dict.get('months_only')
+
+                total = 0.0
+                if years:
+                    total += float(years)
+                if months:
+                    total += float(months) / 12
+                if months_only:
+                    total += float(months_only) / 12
+
+                experience_years.append(total)
+
+        return round(max(experience_years), 2) if experience_years else 0.0
     
     def extract_companies(self, text: str) -> List[Dict[str, str]]:
         """Extract company names and tenure information."""
@@ -187,29 +197,71 @@ class ResumeParser:
         return list(skills_found)[:20]  # Limit to top 20 skills
     
     def parse_resume(self, pdf_path: str) -> ParsedResume:
-        """Parse a resume PDF and extract all relevant information."""
+        """Parse a resume PDF and extract all relevant information using keyword clues."""
         logger.info(f"Parsing resume: {pdf_path}")
-        
-        # Extract text from PDF
+
         raw_text = self.extract_text_from_pdf(pdf_path)
-        
         if not raw_text:
             logger.warning(f"No text extracted from {pdf_path}")
             return ParsedResume(raw_text=raw_text)
-        
-        # Extract information
+
+        lines = raw_text.split('\n')
+
+        # Expanded keyword clues for section detection
+        clue_words = {
+            'skills': {'skills', 'technologies', 'tools', 'proficiencies', 'languages', 'technical proficiency'},
+            'experience': {'experience', 'worked for', 'internship', 'employment', 'project', 'work'},
+            'name': {'name'},
+            'email': {'email'},
+            'phone': {'phone', 'mobile', 'contact', 'tel'}
+        }
+
+        section_lines = {
+            'skills': [],
+            'experience': [],
+            'name': [],
+            'email': [],
+            'phone': [],
+            'other': []
+        }
+
+        current_section = 'other'
+        for line in lines:
+            clean_line = line.strip().lower()
+            matched_section = None
+
+            for section, clues in clue_words.items():
+                if any(clue in clean_line for clue in clues):
+                    matched_section = section
+                    break
+
+            if matched_section:
+                current_section = matched_section
+
+            section_lines[current_section].append(line.strip())
+
+        # Fallback: try to guess the name from uppercase lines if needed
+        name_text = '\n'.join(section_lines['name'][:5]) or raw_text
+        name = self.extract_name(name_text)
+        if not name:
+            for line in lines:
+                if line.strip().isupper() and 1 < len(line.strip().split()) < 5:
+                    name = line.strip()
+                    break
+
         parsed = ParsedResume(
-            name=self.extract_name(raw_text),
-            email=self.extract_email(raw_text),
-            phone=self.extract_phone(raw_text),
-            total_experience=self.extract_experience_years(raw_text),
-            companies=self.extract_companies(raw_text),
-            skills=self.extract_skills(raw_text),
+            name=name,
+            email=self.extract_email('\n'.join(section_lines['email']) or raw_text),
+            phone=self.extract_phone('\n'.join(section_lines['phone']) or raw_text),
+            total_experience=self.extract_experience_years('\n'.join(section_lines['experience'])),
+            companies=self.extract_companies('\n'.join(section_lines['experience'])),
+            skills=self.extract_skills('\n'.join(section_lines['skills'])),
             raw_text=raw_text
         )
-        
+
         logger.info(f"Successfully parsed resume: {parsed.name or 'Unknown'}")
         return parsed
+
     
     def parse_resumes_from_folder(self, folder_path: str) -> List[ParsedResume]:
         """Parse all PDF files in a folder."""
